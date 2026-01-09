@@ -2,7 +2,8 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { createClient } from '@/lib/supabase'
-import { Trash2, ShoppingCart, Printer, FileText, Search, CreditCard, Zap, Package, X, Layers, Loader2, DollarSign } from 'lucide-react'
+import { useRouter } from 'next/navigation' // <--- Importamos useRouter
+import { Trash2, ShoppingCart, Printer, FileText, Search, CreditCard, Zap, Package, X, Layers, Loader2, DollarSign, LogOut, ClipboardList } from 'lucide-react'
 
 // --- TIPOS ---
 type CartItem = {
@@ -30,6 +31,7 @@ const formatCurrency = (amount: number) => {
 
 export default function POSInterface() {
     const supabase = createClient()
+    const router = useRouter() // <--- Hook de navegación
 
     // --- STATE ---
     const [cart, setCart] = useState<CartItem[]>([])
@@ -86,18 +88,14 @@ export default function POSInterface() {
         return () => clearTimeout(timer)
     }, [searchQuery])
 
-    // --- LÓGICA AGREGAR AL CARRITO (CENTRALIZADA) ---
+    // --- LÓGICA AGREGAR AL CARRITO ---
     const handleProductClick = (product: Product) => {
-        // 1. Si es precio variable, PAUSA y muestra modal
         if (product.is_variable_price) {
-            setManualPriceInput('') // Limpiar input anterior
+            setManualPriceInput('')
             setPriceModal({ open: true, product })
-            // Hacemos focus al input del modal con un pequeño delay para que renderice
             setTimeout(() => priceInputRef.current?.focus(), 100)
             return
         }
-
-        // 2. Si es precio fijo, agrega directo
         addToCart(product)
     }
 
@@ -106,12 +104,10 @@ export default function POSInterface() {
         if (!priceModal.product) return
 
         const price = parseFloat(manualPriceInput)
-        if (isNaN(price) || price <= 0) return // Validación básica
+        if (isNaN(price) || price <= 0) return
 
-        // Agregamos con el precio manual (overridePrice)
         addToCart(priceModal.product, undefined, price)
 
-        // Cerrar modal y limpiar
         setPriceModal({ open: false, product: null })
         setManualPriceInput('')
         inputRef.current?.focus()
@@ -120,17 +116,14 @@ export default function POSInterface() {
     const addToCart = (product: Product, quantityOverride?: number, priceOverride?: number) => {
         let qtyToAdd = quantityOverride || 1
 
-        // Lógica de cantidad desde el buscador (solo si no es override explícito)
         const searchAsNumber = parseInt(searchQuery)
         if (!quantityOverride && !isNaN(searchAsNumber) && searchAsNumber > 0 && searchQuery.length < 5) {
             qtyToAdd = searchAsNumber
         }
 
-        // El precio final es: O el que escribimos manualmente, O el de la base de datos
         const finalPrice = priceOverride !== undefined ? priceOverride : product.price
 
         setCart(prev => {
-            // NOTA: Para precio variable, NO agrupamos si el precio es diferente
             const existing = prev.find(i => i.dbId === product.id && i.price === finalPrice)
 
             if (existing) {
@@ -155,7 +148,7 @@ export default function POSInterface() {
         if (e.key === 'Enter' && searchQuery.trim()) {
             const { data } = await supabase.from('products').select('*').eq('code', searchQuery.trim()).single()
             if (data) {
-                handleProductClick(data as Product) // Usamos el handler inteligente
+                handleProductClick(data as Product)
             } else if (searchResults.length > 0) {
                 handleProductClick(searchResults[0])
             }
@@ -173,11 +166,9 @@ export default function POSInterface() {
         inputRef.current?.focus()
     }
 
-    // --- CÁLCULOS (AQUÍ FALTABA totalItems) ---
     const total = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0)
-    const totalItems = cart.reduce((acc, item) => acc + item.quantity, 0) // <--- ESTA LÍNEA FALTABA
+    const totalItems = cart.reduce((acc, item) => acc + item.quantity, 0)
 
-    // --- ESTILOS ---
     const getProductStyle = (name: string) => {
         const n = name.toLowerCase()
         if (n.includes('b/n') || (n.includes('blanco') && n.includes('negro'))) return { icon: Printer, color: 'text-gray-700', bg: 'bg-white border-gray-300 hover:bg-gray-100 hover:border-gray-400 shadow-sm' }
@@ -187,12 +178,10 @@ export default function POSInterface() {
         return { icon: Zap, color: 'text-indigo-600', bg: 'bg-indigo-50 border-indigo-200 hover:bg-indigo-100 hover:border-indigo-300 shadow-sm' }
     }
 
-    // --- ORDENAMIENTO VISUAL ---
     const smallCards = quickProducts.filter(p => p.name.length <= 15)
     const largeCards = quickProducts.filter(p => p.name.length > 15)
     const orderedQuickProducts = [...smallCards, ...largeCards]
 
-    // Focus Trap
     useEffect(() => {
         if (!priceModal.open) {
             const timeout = setTimeout(() => inputRef.current?.focus(), 100)
@@ -284,8 +273,6 @@ export default function POSInterface() {
                             ))
                         )}
                     </div>
-
-                    {/* FOOTER - AQUÍ SE USABA LA VARIABLE QUE FALTABA */}
                     <div className="bg-gray-50 p-2 text-xs text-gray-400 text-center border-t border-gray-100 flex justify-between px-4">
                         <span>Items: {cart.length}</span>
                         <span>Unidades: {totalItems}</span>
@@ -295,7 +282,18 @@ export default function POSInterface() {
 
             {/* DERECHA */}
             <div className="w-[380px] bg-white border-l border-gray-200 flex flex-col h-full shadow-xl z-10">
-                <div className="p-6 border-b border-gray-100 bg-gradient-to-b from-white to-gray-50">
+
+                {/* Header Total y Botón Cierre */}
+                <div className="p-6 border-b border-gray-100 bg-gradient-to-b from-white to-gray-50 relative">
+                    {/* BOTÓN DE CIERRE DE CAJA */}
+                    <button
+                        onClick={() => router.push('/cash-cut')}
+                        className="absolute top-4 right-4 p-2 bg-white border border-gray-200 text-gray-500 rounded-lg hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-all shadow-sm"
+                        title="Ir a Cierre de Caja"
+                    >
+                        <ClipboardList size={20} />
+                    </button>
+
                     <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-1">Total a Pagar</h2>
                     <div className="flex items-baseline gap-1 text-slate-900">
                         <span className="text-5xl font-extrabold tracking-tight">{formatCurrency(total)}</span>

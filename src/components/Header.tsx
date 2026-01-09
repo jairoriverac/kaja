@@ -4,9 +4,10 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { Bell, ChevronDown, LogOut, User, Store } from 'lucide-react'
+import { ChevronDown, LogOut, User } from 'lucide-react'
 import { createClient } from '@/lib/supabase'
 import { Database } from '@/types/database.types'
+import NotificationsBell from '@/components/NotificationsBell' // <--- 1. IMPORTAMOS EL COMPONENTE
 
 type Profile = Database['public']['Tables']['profiles']['Row']
 
@@ -110,11 +111,10 @@ export default function Header() {
                 <div className="h-8 w-px bg-gray-200 hidden md:block"></div>
 
                 <div className="flex items-center gap-3">
-                    {/* Notificaciones */}
-                    <button className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-full transition-colors relative">
-                        <Bell size={20} />
-                        <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border border-white"></span>
-                    </button>
+
+                    {/* --- AQUÍ REEMPLAZAMOS EL BOTÓN VIEJO POR EL NUEVO --- */}
+                    <NotificationsBell />
+                    {/* ----------------------------------------------------- */}
 
                     {/* Menú Usuario */}
                     <div className="relative" ref={menuRef}>
@@ -145,7 +145,6 @@ export default function Header() {
                                     <p className="text-sm font-bold text-gray-800 truncate">{userData?.email}</p>
                                 </div>
 
-                                {/* ENLACE CORREGIDO A /admin/profile */}
                                 <Link
                                     href="/admin/profile"
                                     onClick={() => setIsOpen(false)}

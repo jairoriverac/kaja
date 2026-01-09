@@ -34,7 +34,7 @@ const MODULES = [
         icon: Lock,
         color: 'text-green-600',
         bg: 'bg-green-50',
-        href: '/admin/cash-count'
+        href: '/cash-cut'
     },
     {
         title: 'Reportes',
