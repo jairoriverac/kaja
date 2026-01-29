@@ -20,13 +20,15 @@ import {
   ShoppingCart,
   Trash2,
   ArrowDownCircle,
-  Lock, // <--- 1. IMPORTAMOS EL CANDADO
+  Lock,
+  ShieldAlert, // <--- Importamos este icono nuevo para el admin
 } from "lucide-react";
 import ExpenseModal from "@/components/ExpenseModal";
 import PaymentModal from "@/components/PaymentModal";
 import InjectionModal from "@/components/InjectionModal";
-import { checkRegisterStatus } from "@/actions/checkRegisterStatus"; // <--- 2. IMPORTAMOS LA ACCIÓN
+import { checkRegisterStatus } from "@/actions/checkRegisterStatus";
 
+// ... (Tipos y helpers iguales) ...
 type CartItem = {
   id: string;
   dbId: string;
@@ -65,28 +67,25 @@ export default function POSInterface() {
   const supabase = createClient();
   const router = useRouter();
 
-  // --- 3. ESTADOS DE BLOQUEO DE CAJA ---
+  // --- ESTADOS ---
   const [isRegisterOpen, setIsRegisterOpen] = useState(true);
   const [checkingStatus, setCheckingStatus] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
 
-  // --- STATE NORMAL ---
   const [cart, setCart] = useState<CartItem[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [quickProducts, setQuickProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Configuración
   const [storeSettings, setStoreSettings] = useState<StoreSettings | null>(
     null
   );
   const [logoBase64, setLogoBase64] = useState<string | null>(null);
 
-  // Búsqueda
   const [searchResults, setSearchResults] = useState<Product[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
 
-  // Modales
   const [priceModal, setPriceModal] = useState<{
     open: boolean;
     product: Product | null;
@@ -96,12 +95,10 @@ export default function POSInterface() {
   const [isInjectionModalOpen, setIsInjectionModalOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
 
-  // Inputs
   const [manualPriceInput, setManualPriceInput] = useState("");
   const priceInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Toasts
   const [toast, setToast] = useState<{
     show: boolean;
     message: string;
@@ -120,11 +117,26 @@ export default function POSInterface() {
     setTimeout(() => setToast((prev) => ({ ...prev, show: false })), 4000);
   };
 
-  // --- 4. EFECTO: VERIFICAR SI LA CAJA ESTÁ CERRADA ---
+  // --- EFECTOS ---
   useEffect(() => {
     const checkStatus = async () => {
       const status = await checkRegisterStatus();
       setIsRegisterOpen(status.isOpen);
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: profile } = await (supabase.from("profiles") as any)
+          .select("role")
+          .eq("id", user.id)
+          .single();
+
+        if (profile?.role === "admin") {
+          setIsAdmin(true);
+        }
+      }
       setCheckingStatus(false);
     };
     checkStatus();
@@ -165,7 +177,6 @@ export default function POSInterface() {
     initData();
   }, []);
 
-  // --- LÓGICA VENTA Y CARRITO ---
   useEffect(() => {
     const isQuantityMode =
       !isNaN(parseInt(searchQuery)) && searchQuery.length < 5;
@@ -349,9 +360,6 @@ export default function POSInterface() {
     isInjectionModalOpen,
   ]);
 
-  // --- 5. RENDERIZADO CONDICIONAL (BLOQUEO) ---
-
-  // A. Verificando estado...
   if (checkingStatus) {
     return (
       <div className="h-full flex flex-col items-center justify-center bg-gray-50 gap-4">
@@ -363,8 +371,8 @@ export default function POSInterface() {
     );
   }
 
-  // B. CAJA CERRADA -> PANTALLA DE BLOQUEO
-  if (!isRegisterOpen) {
+  // --- PANTALLA BLOQUEADA (SI NO ES ADMIN) ---
+  if (!isRegisterOpen && !isAdmin) {
     return (
       <div className="h-full flex flex-col items-center justify-center bg-gray-100 p-6 text-center">
         <div className="w-24 h-24 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-6 shadow-xl">
@@ -394,11 +402,32 @@ export default function POSInterface() {
     );
   }
 
-  // C. CAJA ABIERTA -> POS NORMAL
   return (
     <div className="flex h-full bg-gray-100 font-sans overflow-hidden relative">
+      {/* ================================================================= */}
+      {/* --- AVISO FLOTANTE ELEGANTE PARA ADMIN EN SEGUNDO TURNO --- */}
+      {/* ================================================================= */}
+      {!isRegisterOpen && isAdmin && (
+        <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-10 fade-in duration-500">
+          <div className="bg-orange-600 text-white px-5 py-2.5 rounded-full shadow-2xl shadow-orange-900/30 flex items-center gap-3 border-2 border-white/20 backdrop-blur-sm">
+            <div className="bg-white/20 p-1.5 rounded-full">
+              <ShieldAlert size={16} className="text-white" />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-[10px] font-bold uppercase tracking-widest opacity-90 leading-none">
+                Modo Administrador
+              </span>
+              <span className="text-sm font-bold leading-tight">
+                Turno Extra (Caja Cerrada)
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ================================================================= */}
+
       {/* IZQUIERDA */}
-      <div className="flex-1 flex flex-col p-4 pr-2 gap-4 h-full min-w-0 relative">
+      <div className="flex-1 flex flex-col p-4 pr-2 gap-4 h-full min-w-0 relative pt-4 md:pt-4">
         {/* BARRA BÚSQUEDA */}
         <div className="bg-white p-4 rounded-xl shadow-sm flex items-center gap-3 border border-gray-200 shrink-0 relative z-20">
           <Search className="text-gray-400 w-6 h-6" />
@@ -430,7 +459,6 @@ export default function POSInterface() {
           )}
           {showDropdown && (
             <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-200 rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-2">
-              {" "}
               {isSearching ? (
                 <div className="p-4 text-center text-gray-400 flex items-center justify-center gap-2">
                   <Loader2 className="animate-spin" size={16} /> Buscando...
@@ -441,52 +469,46 @@ export default function POSInterface() {
                 </div>
               ) : (
                 <div className="divide-y divide-gray-50">
-                  {" "}
                   {searchResults.map((prod) => (
                     <button
                       key={prod.id}
                       onClick={() => handleProductClick(prod)}
                       className="w-full text-left p-3 hover:bg-blue-50 flex justify-between items-center group transition-colors"
                     >
-                      {" "}
                       <div>
-                        {" "}
                         <p className="font-bold text-gray-800 text-sm">
                           {prod.name}
-                        </p>{" "}
+                        </p>
                         <p className="text-xs text-gray-400 font-mono">
                           {prod.code ? `COD: ${prod.code}` : "Sin Código"} •{" "}
                           {prod.product_type === "fisico"
                             ? `Stock: ${prod.stock}`
                             : "Servicio"}
-                        </p>{" "}
-                      </div>{" "}
+                        </p>
+                      </div>
                       <span className="font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-lg border border-blue-100 group-hover:bg-white transition-colors">
                         ${prod.price.toFixed(2)}
-                      </span>{" "}
+                      </span>
                     </button>
-                  ))}{" "}
+                  ))}
                 </div>
-              )}{" "}
+              )}
             </div>
           )}
         </div>
-
         {/* TABLA CARRITO */}
         <div className="flex-1 bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col overflow-hidden z-10">
           <div className="grid grid-cols-12 bg-gray-50 p-3 font-semibold text-gray-500 text-xs uppercase tracking-wider border-b">
-            {" "}
-            <div className="col-span-6 pl-2">Descripción</div>{" "}
-            <div className="col-span-2 text-center">Cant.</div>{" "}
-            <div className="col-span-2 text-right">Precio</div>{" "}
-            <div className="col-span-2 text-right pr-2">Total</div>{" "}
+            <div className="col-span-6 pl-2">Descripción</div>
+            <div className="col-span-2 text-center">Cant.</div>
+            <div className="col-span-2 text-right">Precio</div>
+            <div className="col-span-2 text-right pr-2">Total</div>
           </div>
           <div className="flex-1 overflow-y-auto">
             {cart.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-gray-300">
-                {" "}
-                <ShoppingCart size={48} className="mb-3 opacity-20" />{" "}
-                <p className="font-medium">El carrito está vacío</p>{" "}
+                <ShoppingCart size={48} className="mb-3 opacity-20" />
+                <p className="font-medium">El carrito está vacío</p>
               </div>
             ) : (
               cart.map((item) => (
@@ -494,20 +516,17 @@ export default function POSInterface() {
                   key={item.id}
                   className="grid grid-cols-12 items-center p-3 border-b border-gray-50 hover:bg-blue-50/50 transition-colors group"
                 >
-                  {" "}
                   <div className="col-span-6 pl-2">
-                    {" "}
                     <p className="font-bold text-gray-800 text-sm truncate">
                       {item.name}
-                    </p>{" "}
+                    </p>
                     {item.type === "servicio" && (
                       <span className="inline-block mt-0.5 text-[10px] bg-purple-100 text-purple-600 px-1.5 rounded font-medium">
                         SERVICIO
                       </span>
-                    )}{" "}
-                  </div>{" "}
+                    )}
+                  </div>
                   <div className="col-span-2 flex justify-center">
-                    {" "}
                     <input
                       type="number"
                       min="1"
@@ -515,16 +534,13 @@ export default function POSInterface() {
                       onChange={(e) => updateQuantity(item.id, e.target.value)}
                       onClick={(e) => e.stopPropagation()}
                       className="w-16 text-center font-bold text-gray-700 bg-gray-100 border border-transparent hover:border-gray-300 focus:border-blue-500 focus:bg-white rounded-lg p-1 outline-none transition-all"
-                    />{" "}
-                  </div>{" "}
+                    />
+                  </div>
                   <div className="col-span-2 text-right text-gray-500 text-sm font-mono">
                     {item.price.toFixed(2)}
-                  </div>{" "}
+                  </div>
                   <div className="col-span-2 text-right font-bold text-gray-900 pr-2 flex justify-end items-center gap-2">
-                    {" "}
-                    <span>
-                      {formatCurrency(item.price * item.quantity)}
-                    </span>{" "}
+                    <span>{formatCurrency(item.price * item.quantity)}</span>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -532,26 +548,23 @@ export default function POSInterface() {
                       }}
                       className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-all p-1"
                     >
-                      {" "}
-                      <Trash2 size={16} />{" "}
-                    </button>{" "}
-                  </div>{" "}
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
                 </div>
               ))
             )}
           </div>
           <div className="bg-gray-50 p-2 text-xs text-gray-400 text-center border-t border-gray-100 flex justify-between px-4">
-            {" "}
-            <span>Items: {cart.length}</span>{" "}
-            <span>Unidades: {totalItems}</span>{" "}
+            <span>Items: {cart.length}</span>
+            <span>Unidades: {totalItems}</span>
           </div>
         </div>
       </div>
       {/* DERECHA */}
-      <div className="w-[380px] bg-white border-l border-gray-200 flex flex-col h-full shadow-xl z-10">
+      <div className="w-[380px] bg-white border-l border-gray-200 flex flex-col h-full shadow-xl z-10 pt-0">
         <div className="p-6 border-b border-gray-100 bg-gradient-to-b from-white to-gray-50 relative">
           <div className="absolute top-4 right-4 flex gap-2">
-            {/* BOTÓN INGRESAR DINERO (VERDE) */}
             <button
               onClick={() => setIsInjectionModalOpen(true)}
               className="p-2 bg-white border border-gray-200 text-green-500 rounded-lg hover:bg-green-50 hover:text-green-600 hover:border-green-200 transition-all shadow-sm"
@@ -559,8 +572,6 @@ export default function POSInterface() {
             >
               <ArrowDownCircle size={20} />
             </button>
-
-            {/* BOTÓN GASTO */}
             <button
               onClick={() => setIsExpenseModalOpen(true)}
               className="p-2 bg-white border border-gray-200 text-orange-500 rounded-lg hover:bg-orange-50 hover:text-orange-600 hover:border-orange-200 transition-all shadow-sm"
@@ -568,8 +579,6 @@ export default function POSInterface() {
             >
               <Wallet size={20} />
             </button>
-
-            {/* BOTÓN CIERRE */}
             <button
               onClick={() => router.push("/cash-cut")}
               className="p-2 bg-white border border-gray-200 text-gray-500 rounded-lg hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-all shadow-sm"
@@ -588,7 +597,6 @@ export default function POSInterface() {
             </span>
           </div>
         </div>
-
         <div className="flex-1 p-5 overflow-y-auto bg-white">
           <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2">
             <Zap size={14} /> Accesos Rápidos
@@ -600,7 +608,6 @@ export default function POSInterface() {
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-3">
-              {" "}
               {orderedQuickProducts.map((prod) => {
                 const style = getProductStyle(prod.name);
                 const Icon = style.icon;
@@ -617,36 +624,33 @@ export default function POSInterface() {
                         : "flex-col justify-center gap-1"
                     }`}
                   >
-                    {" "}
                     <div
                       className={`flex items-center gap-2 ${
                         !isLongName && "flex-col"
                       }`}
                     >
-                      {" "}
-                      <Icon className={`w-5 h-5 ${style.color}`} />{" "}
+                      <Icon className={`w-5 h-5 ${style.color}`} />
                       <span
                         className={`font-bold text-xs text-gray-700 leading-tight ${
                           isLongName ? "text-left" : "text-center line-clamp-2"
                         }`}
                       >
                         {prod.name}
-                      </span>{" "}
-                    </div>{" "}
+                      </span>
+                    </div>
                     <span
                       className={`text-[10px] font-bold ${style.color} bg-white/60 px-2 py-0.5 rounded border border-gray-100`}
                     >
                       {prod.is_variable_price
                         ? "Variable"
                         : `$${prod.price.toFixed(2)}`}
-                    </span>{" "}
+                    </span>
                   </button>
                 );
-              })}{" "}
+              })}
             </div>
           )}
         </div>
-
         <div className="p-5 border-t border-gray-200 bg-white">
           <button
             className="w-full bg-slate-900 hover:bg-black text-white h-14 rounded-xl font-bold text-lg shadow-lg active:translate-y-0.5 transition-all flex items-center justify-center gap-3 disabled:opacity-50"
@@ -659,31 +663,26 @@ export default function POSInterface() {
       </div>
       {priceModal.open && priceModal.product && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-          {" "}
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden p-6 animate-in zoom-in-95">
-            {" "}
             <div className="text-center mb-6">
-              {" "}
               <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
                 <DollarSign className="text-blue-600 w-6 h-6" />
-              </div>{" "}
+              </div>
               <h3 className="text-xl font-bold text-gray-900">
                 Precio Variable
-              </h3>{" "}
+              </h3>
               <p className="text-sm text-gray-500">
                 Ingresa el valor para: <br />
                 <strong className="text-gray-800">
                   {priceModal.product.name}
                 </strong>
-              </p>{" "}
-            </div>{" "}
+              </p>
+            </div>
             <form onSubmit={confirmVariablePrice}>
-              {" "}
               <div className="relative mb-6">
-                {" "}
                 <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-xl font-bold">
                   $
-                </span>{" "}
+                </span>
                 <input
                   ref={priceInputRef}
                   type="number"
@@ -694,29 +693,27 @@ export default function POSInterface() {
                   onChange={(e) => setManualPriceInput(e.target.value)}
                   placeholder="0.00"
                   className="w-full pl-10 pr-4 py-4 text-3xl font-bold text-gray-900 bg-gray-50 border-2 border-blue-100 rounded-xl focus:border-blue-500 focus:bg-white outline-none text-center transition-all"
-                />{" "}
-              </div>{" "}
+                />
+              </div>
               <div className="flex gap-3">
-                {" "}
                 <button
                   type="button"
                   onClick={() => setPriceModal({ open: false, product: null })}
                   className="flex-1 py-3 text-gray-600 font-bold hover:bg-gray-100 rounded-xl transition-colors"
                 >
                   Cancelar
-                </button>{" "}
+                </button>
                 <button
                   type="submit"
                   className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg shadow-blue-200 transition-all"
                 >
                   Confirmar
-                </button>{" "}
-              </div>{" "}
-            </form>{" "}
-          </div>{" "}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
-      {/* MODALES */}
       <ExpenseModal
         isOpen={isExpenseModalOpen}
         onClose={() => setIsExpenseModalOpen(false)}
@@ -726,8 +723,7 @@ export default function POSInterface() {
         isOpen={isInjectionModalOpen}
         onClose={() => setIsInjectionModalOpen(false)}
         onShowToast={showToast}
-      />{" "}
-      {/* <--- AQUI */}
+      />
       <PaymentModal
         isOpen={isPaymentModalOpen}
         onClose={() => setIsPaymentModalOpen(false)}
@@ -740,7 +736,6 @@ export default function POSInterface() {
       />
       {toast.show && (
         <div className="fixed bottom-6 right-6 z-[70] animate-in slide-in-from-bottom-5 fade-in duration-300">
-          {" "}
           <div
             className={`flex items-center gap-3 px-6 py-4 rounded-xl shadow-2xl border ${
               toast.type === "success"
@@ -748,7 +743,6 @@ export default function POSInterface() {
                 : "bg-white border-red-100 text-red-800"
             }`}
           >
-            {" "}
             <div
               className={`p-2 rounded-full ${
                 toast.type === "success"
@@ -756,21 +750,19 @@ export default function POSInterface() {
                   : "bg-red-100 text-red-600"
               }`}
             >
-              {" "}
               {toast.type === "success" ? (
                 <CheckCircle2 size={24} />
               ) : (
                 <AlertCircle size={24} />
-              )}{" "}
-            </div>{" "}
+              )}
+            </div>
             <div>
-              {" "}
               <h4 className="font-bold text-sm">
                 {toast.type === "success" ? "¡Éxito!" : "Error"}
-              </h4>{" "}
-              <p className="text-sm font-medium opacity-90">{toast.message}</p>{" "}
-            </div>{" "}
-          </div>{" "}
+              </h4>
+              <p className="text-sm font-medium opacity-90">{toast.message}</p>
+            </div>
+          </div>
         </div>
       )}
     </div>

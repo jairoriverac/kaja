@@ -1,65 +1,92 @@
 "use server";
 import { createClient } from "@/lib/supabaseServer";
 
+interface CashCut {
+  id: string;
+  details: any;
+  notes: string;
+  withdrawal: number;
+  counted_cash: number;
+  is_admin_finalized: boolean;
+  initial_cash: number;
+  system_sales: number;
+  system_expenses: number;
+  system_injections: number;
+  system_credits: number; // <--- Importante leer esto de la DB
+  system_digital: number; // <--- Importante leer esto de la DB
+}
+
 export async function getDailySummary() {
   const supabase = createClient();
 
-  // --- 1. AJUSTE ROBUSTO DE HORAS PARA ECUADOR (UTC-5) ---
   const now = new Date();
   const ecuadorOffset = 5 * 60 * 60 * 1000;
-  const ecuadorDate = new Date(now.getTime() - ecuadorOffset);
-  const todayStr = ecuadorDate.toISOString().split("T")[0];
-
-  // Rango UTC: 05:00 de hoy hasta 05:00 de mañana
-  // Esto cubre todo el día operativo en Ecuador.
+  const todayStr = new Date(now.getTime() - ecuadorOffset)
+    .toISOString()
+    .split("T")[0];
   const startUtc = `${todayStr}T05:00:00.000Z`;
-
-  const tomorrow = new Date(ecuadorDate);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStr = tomorrow.toISOString().split("T")[0];
-  const endUtc = `${tomorrowStr}T05:00:00.000Z`;
+  const endUtc = `${
+    new Date(new Date(startUtc).getTime() + 86400000)
+      .toISOString()
+      .split("T")[0]
+  }T05:00:00.000Z`;
 
   try {
-    // 2. Obtener Cierre de AYER (Para calcular caja inicial)
+    // 1. BUSCAR CIERRE DE HOY
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: lastCut, error: lastCutError } = await (
-      supabase.from("cash_cuts") as any
-    )
-      .select("counted_cash, withdrawal")
-      .lt("created_at", startUtc) // Todo lo anterior al inicio de "hoy"
+    const { data: todayCutData } = await (supabase.from("cash_cuts") as any)
+      .select(`*`) // Seleccionamos TODO para traer system_credits y system_digital
+      .gte("created_at", startUtc)
+      .lt("created_at", endUtc)
       .order("created_at", { ascending: false })
       .limit(1)
-      .single();
+      .maybeSingle();
 
-    if (lastCutError && lastCutError.code !== "PGRST116") {
-      console.error("Error obteniendo cierre anterior:", lastCutError.message);
+    const todayCut = todayCutData as CashCut | null;
+
+    // --- CASO A: YA EXISTE UN CIERRE (FOTO CONGELADA) ---
+    if (todayCut) {
+      return {
+        success: true,
+        data: {
+          // Devolvemos EXACTAMENTE lo que se guardó al cerrar.
+          // No recalculamos nada para no mezclar con ventas posteriores.
+          initial: todayCut.initial_cash,
+          sales: todayCut.system_sales,
+          credits: todayCut.system_credits || 0, // Leemos de la foto
+          digital: todayCut.system_digital || 0, // Leemos de la foto
+          expenses: todayCut.system_expenses,
+          injections: todayCut.system_injections,
+
+          existingDetails: todayCut.details,
+          existingNotes: todayCut.notes,
+          existingWithdrawal: todayCut.withdrawal,
+          existingTotal: todayCut.counted_cash,
+          isAdminFinalized: todayCut.is_admin_finalized,
+        },
+      };
     }
 
-    // Fórmula: Lo que se contó ayer MENOS lo que se llevó al banco = Lo que quedó en caja
+    // --- CASO B: CALCULAR EN VIVO (SIN CIERRE AÚN) ---
+
+    // B.1. Inicial (del cierre de ayer)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: lastCut } = await (supabase.from("cash_cuts") as any)
+      .select("counted_cash, withdrawal")
+      .lt("created_at", startUtc)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
     const initial = lastCut
       ? lastCut.counted_cash - (lastCut.withdrawal || 0)
       : 0;
 
-    // 3. Revisar si YA hay un cierre HOY (Para modo edición)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: todayCut, error: todayError } = await (
-      supabase.from("cash_cuts") as any
-    )
-      .select("*")
-      .gte("created_at", startUtc)
-      .lt("created_at", endUtc)
-      .maybeSingle();
-
-    if (todayError) {
-      console.error("Error buscando cierre de hoy:", todayError.message);
-    }
-
-    // 4. Calcular Totales del Día (Ventas, Gastos, Inyecciones)
-    // Optimizamos usando Promise.all para lanzar las 3 consultas al mismo tiempo
+    // B.2. Consultas en vivo
     const [salesRes, expensesRes, injectionsRes] = await Promise.all([
       supabase
         .from("sales")
-        .select("total")
+        .select("total, amount_paid, payment_method, balance_due")
         .gte("created_at", startUtc)
         .lt("created_at", endUtc),
       supabase
@@ -67,16 +94,28 @@ export async function getDailySummary() {
         .select("amount")
         .gte("created_at", startUtc)
         .lt("created_at", endUtc),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (supabase.from("cash_injections") as any)
         .select("amount")
         .gte("created_at", startUtc)
         .lt("created_at", endUtc),
     ]);
 
-    // Sumatorias
+    // B.3. Cálculos
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const totalSales =
       salesRes.data?.reduce((sum, r: any) => sum + (r.total || 0), 0) || 0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const totalCredits =
+      salesRes.data?.reduce((sum, r: any) => sum + (r.balance_due || 0), 0) ||
+      0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const totalDigital =
+      salesRes.data?.reduce((sum, r: any) => {
+        if (["TRANSFERENCIA", "DE_UNA"].includes(r.payment_method))
+          return sum + (r.total || 0);
+        return sum;
+      }, 0) || 0;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const totalExpenses =
       expensesRes.data?.reduce((sum, r: any) => sum + (r.amount || 0), 0) || 0;
@@ -92,21 +131,30 @@ export async function getDailySummary() {
       data: {
         initial,
         sales: totalSales,
+        credits: totalCredits,
+        digital: totalDigital,
         expenses: totalExpenses,
         injections: totalInjections,
-        // Datos para pre-llenar si ya existe cierre hoy (Modo Edición)
-        existingDetails: todayCut?.details || null,
-        existingNotes: todayCut?.notes || "",
-        existingWithdrawal: todayCut?.withdrawal || 0,
-        existingTotal: todayCut?.counted_cash || 0,
+        existingDetails: null,
+        existingNotes: "",
+        existingWithdrawal: 0,
+        existingTotal: 0,
+        isAdminFinalized: false,
       },
     };
   } catch (error: any) {
-    console.error("Error fetching daily summary:", error);
-    // Devolvemos 0 en lugar de romper la app
+    console.error("Error fetching summary:", error);
     return {
       success: false,
-      data: { initial: 0, sales: 0, expenses: 0, injections: 0 },
+      data: {
+        initial: 0,
+        sales: 0,
+        credits: 0,
+        digital: 0,
+        expenses: 0,
+        injections: 0,
+        isAdminFinalized: false,
+      },
     };
   }
 }
